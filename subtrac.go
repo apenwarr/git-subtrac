@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"github.com/pborman/getopt/v2"
 	"gopkg.in/src-d/go-git.v4"
+	"gopkg.in/src-d/go-git.v4/config"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/filemode"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,14 +47,16 @@ func (t Trac) String() string {
 }
 
 type Cache struct {
-	repo  *git.Repository
-	tracs map[plumbing.Hash]*Trac
+	repoDir string
+	repo    *git.Repository
+	tracs   map[plumbing.Hash]*Trac
 }
 
-func NewCache(r *git.Repository) *Cache {
+func NewCache(rdir string, r *git.Repository) *Cache {
 	c := Cache{
-		repo:  r,
-		tracs: make(map[plumbing.Hash]*Trac),
+		repoDir: rdir,
+		repo:    r,
+		tracs:   make(map[plumbing.Hash]*Trac),
 	}
 	return &c
 }
@@ -138,6 +142,67 @@ func commitPath(path string, sub int) string {
 	return fmt.Sprintf("%s~%d", path[:ix], v+1)
 }
 
+func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
+	debugf("Searching submodules for: %.10v %v\n", hash, path)
+	wt, err := c.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("git worktree: %v", err)
+	}
+	subs, err := wt.Submodules()
+	if err != nil {
+		return fmt.Errorf("git submodules: %v", subs)
+	}
+	for _, sub := range subs {
+		subpath := sub.Config().Path
+		subr, err := sub.Repository()
+		if err != nil {
+			return fmt.Errorf("submodule %v: %v", subpath, err)
+		}
+		_, err = subr.CommitObject(hash)
+		if err != nil {
+			debugf("  ...not in %v\n", subpath)
+			continue
+		}
+		brname := fmt.Sprintf("subtrac-tmp-%v", hash)
+		brrefname := plumbing.NewBranchReferenceName(brname)
+		ref := plumbing.NewHashReference(brrefname, hash)
+		err = subr.Storer.SetReference(ref)
+		defer subr.Storer.RemoveReference(brrefname)
+		if err != nil {
+			return fmt.Errorf("submodule %v: create %v: %v", subpath, ref, err)
+		}
+		remotename := fmt.Sprintf("%v/.git/modules/%v",
+			c.repoDir, sub.Config().Name)
+		absremotename, err := filepath.Abs(remotename)
+		if err != nil {
+			return fmt.Errorf("AbsPath(%v): %v", remotename, err)
+		}
+		remote, err := c.repo.CreateRemoteAnonymous(&config.RemoteConfig{
+			Name: "anonymous",
+			URLs: []string{absremotename},
+		})
+		if err != nil {
+			return fmt.Errorf("submodule %v: CreateRemote: %v", absremotename, err)
+		}
+		err = remote.Fetch(&git.FetchOptions{
+			RemoteName: "anonymous",
+			RefSpecs: []config.RefSpec{
+				config.RefSpec(brrefname + ":TRAC_FETCH_HEAD"),
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("submodule %v: fetch: %v", absremotename, err)
+		}
+		// Fetch worked!
+		err = subr.Storer.RemoveReference(brrefname)
+		if err != nil {
+			return fmt.Errorf("submodule %v: remove %v: %v", subpath, ref, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("%v: %.10v not found.", path, hash)
+}
+
 func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	trac := c.tracs[tree.Hash]
 	if trac != nil {
@@ -145,10 +210,17 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	}
 	for _, e := range tree.Entries {
 		if e.Mode == filemode.Submodule {
-			sc, err := c.repo.CommitObject(e.Hash)
 			subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
+			sc, err := c.repo.CommitObject(e.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("%v: %v (maybe fetch it?)",
+				err = c.tryFetchFromSubmodules(subpath, e.Hash)
+				if err != nil {
+					return nil, fmt.Errorf("%v (maybe fetch it manually?)", err)
+				}
+			}
+			sc, err = c.repo.CommitObject(e.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("%v: %v",
 					subpath, err)
 			}
 			_, err = c.tracCommit(subpath, sc)
@@ -214,7 +286,7 @@ func main() {
 		if len(args) != 2 {
 			usagef("command cid takes exactly 1 argument")
 		}
-		c := NewCache(r)
+		c := NewCache(*repodir, r)
 		refname := args[1]
 		_, err = c.tracByRef(refname)
 		if err != nil {
