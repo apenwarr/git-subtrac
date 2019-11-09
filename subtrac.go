@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	//	"github.com/pborman/getopt/v2"
+	"github.com/pborman/getopt/v2"
 	"gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/filemode"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"log"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,14 +75,13 @@ func (c *Cache) String() string {
 }
 
 func (c *Cache) tracByRef(refname string) (*Trac, error) {
-	rn := plumbing.NewBranchReferenceName(refname)
-	ref, err := c.repo.Reference(rn, true)
+	h, err := c.repo.ResolveRevision(plumbing.Revision(refname))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: %v", refname, err)
 	}
-	commit, err := c.repo.CommitObject(ref.Hash())
+	commit, err := c.repo.CommitObject(*h)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: %v", refname, err)
 	}
 	return c.tracCommit(refname, commit)
 }
@@ -180,17 +180,48 @@ func (c *Cache) add(trac *Trac) {
 	c.tracs[trac.hash] = trac
 }
 
+var usage_str = `
+Usage: %v [-d GIT_DIR] <command>
+
+Commands:
+    cid <ref>    Generate a tracking commit id based on the given ref
+`
+
+func usagef(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, usage_str[1:], os.Args[0])
+	fmt.Fprintf(os.Stderr, "\nfatal: "+format+"\n", args...)
+	os.Exit(99)
+}
+
 func main() {
 	log.SetFlags(0)
-	r, err := git.PlainOpen(".")
+
+	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
+	getopt.Parse()
+
+	r, err := git.PlainOpen(*repodir)
 	if err != nil {
-		fatalf("git.PlainOpen: %v\n", err)
+		fatalf("git: %v: %v\n", repodir, err)
 	}
-	c := NewCache(r)
-	refname := "junk"
-	_, err = c.tracByRef(refname)
-	if err != nil {
-		fatalf("%v\n", err)
+
+	args := getopt.Args()
+	if len(args) < 1 {
+		usagef("no command specified.")
 	}
-	fmt.Printf("%v\n", c)
+
+	switch args[0] {
+	case "cid":
+		if len(args) != 2 {
+			usagef("command cid takes exactly 1 argument")
+		}
+		c := NewCache(r)
+		refname := args[1]
+		_, err = c.tracByRef(refname)
+		if err != nil {
+			fatalf("%v\n", err)
+		}
+		fmt.Printf("%v\n", c)
+	default:
+		usagef("unknown command %v", args[0])
+	}
 }
