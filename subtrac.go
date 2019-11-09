@@ -90,8 +90,10 @@ func (c *Cache) tracByRef(refname string) (*Trac, error) {
 // any cycles when traversing the commit+submodule hierarchy, although the
 // same sub-objects may occur many times at different points in the tree.
 func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
+	//	debugf("commit %.10v %v\n", commit.Hash, path)
 	trac := c.tracs[commit.Hash]
 	if trac != nil {
+		//		debugf("   found: %v\n", trac)
 		return trac, nil
 	}
 	trac = &Trac{
@@ -113,8 +115,11 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 		}
 		np := commitPath(path, i+1)
 		_, err = c.tracCommit(np, pc)
+		if err != nil {
+			return nil, err
+		}
 	}
-	c.tracs[commit.Hash] = trac
+	c.add(trac)
 	return trac, nil
 }
 
@@ -140,12 +145,21 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	}
 	for _, e := range tree.Entries {
 		if e.Mode == filemode.Submodule {
-			debugf("submodule: %v/\n", e.Name)
+			sc, err := c.repo.CommitObject(e.Hash)
+			subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("%v: %v (maybe fetch it?)",
+					subpath, err)
+			}
+			_, err = c.tracCommit(subpath, sc)
+			if err != nil {
+				return nil, err
+			}
 		} else if e.Mode == filemode.Dir {
 			t, err := c.repo.TreeObject(e.Hash)
 			if err != nil {
 				return nil, fmt.Errorf("%v:%.10v: %v",
-					path, e.Hash, err)
+					path+e.Name, e.Hash, err)
 			}
 			_, err = c.tracTree(path+e.Name+"/", t)
 			if err != nil {
@@ -157,8 +171,13 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 		name: path,
 		hash: tree.Hash,
 	}
-	c.tracs[tree.Hash] = trac
+	c.add(trac)
 	return trac, nil
+}
+
+func (c *Cache) add(trac *Trac) {
+	debugf("  add %.10v %v\n", trac.hash, trac.name)
+	c.tracs[trac.hash] = trac
 }
 
 func main() {
@@ -171,7 +190,7 @@ func main() {
 	refname := "junk"
 	_, err = c.tracByRef(refname)
 	if err != nil {
-		fatalf("AddByRef: %v\n", err)
+		fatalf("%v\n", err)
 	}
 	fmt.Printf("%v\n", c)
 }
