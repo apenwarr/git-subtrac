@@ -27,6 +27,7 @@ func fatalf(fmt string, args ...interface{}) {
 type Trac struct {
 	name       string
 	hash       plumbing.Hash
+	parents    []*Trac
 	subHeads   []*Trac
 	tracCommit *object.Commit
 }
@@ -47,24 +48,22 @@ func (t Trac) String() string {
 }
 
 type Cache struct {
-	repoDir string
-	repo    *git.Repository
-	tracs   map[plumbing.Hash]*Trac
+	repoDir  string
+	repo     *git.Repository
+	excludes map[plumbing.Hash]bool
+	tracs    map[plumbing.Hash]*Trac
 }
 
 func NewCache(rdir string, r *git.Repository, excludes []string) *Cache {
 	c := Cache{
-		repoDir: rdir,
-		repo:    r,
-		tracs:   make(map[plumbing.Hash]*Trac),
+		repoDir:  rdir,
+		repo:     r,
+		excludes: make(map[plumbing.Hash]bool),
+		tracs:    make(map[plumbing.Hash]*Trac),
 	}
 	for _, x := range excludes {
 		hash := plumbing.NewHash(x)
-		trac := &Trac{
-			name: "[excluded]",
-			hash: hash,
-		}
-		c.add(trac)
+		c.excludes[hash] = true
 	}
 	return &c
 }
@@ -102,10 +101,8 @@ func (c *Cache) tracByRef(refname string) (*Trac, error) {
 // any cycles when traversing the commit+submodule hierarchy, although the
 // same sub-objects may occur many times at different points in the tree.
 func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
-	//	debugf("commit %.10v %v\n", commit.Hash, path)
 	trac := c.tracs[commit.Hash]
 	if trac != nil {
-		//		debugf("   found: %v\n", trac)
 		return trac, nil
 	}
 	trac = &Trac{
@@ -116,23 +113,123 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%v:%.10v: %v", path, commit.Hash, err)
 	}
-	_, err = c.tracTree(path+"/", tree)
+	ttrac, err := c.tracTree(path+"/", tree)
 	if err != nil {
 		return nil, err
 	}
+
+	// The list of submodules owned by the tree is the same as the list
+	// owned by the commit.
+	trac.subHeads = ttrac.subHeads
+
 	for i, parent := range commit.ParentHashes {
 		pc, err := c.repo.CommitObject(parent)
 		if err != nil {
 			return nil, fmt.Errorf("%v:%.10v: %v", path, pc.Hash, err)
 		}
 		np := commitPath(path, i+1)
-		_, err = c.tracCommit(np, pc)
+		ptrac, err := c.tracCommit(np, pc)
+		if err != nil {
+			return nil, err
+		}
+		trac.parents = append(trac.parents, ptrac)
+	}
+
+	seenHeads := make(map[plumbing.Hash]bool)
+	seenTracs := make(map[plumbing.Hash]bool)
+	var heads []*Trac
+	var tracs []*object.Commit
+
+	for _, h := range trac.subHeads {
+		if !seenHeads[h.hash] {
+			seenHeads[h.hash] = true
+			heads = append(heads, h)
+		}
+	}
+	for _, p := range trac.parents {
+		if p.tracCommit != nil {
+			if !seenTracs[p.tracCommit.Hash] {
+				seenTracs[p.tracCommit.Hash] = true
+				tracs = append(tracs, p.tracCommit)
+			}
+		}
+	}
+
+	if len(trac.parents) == 1 && equalSubs(trac.subHeads, trac.parents[0].subHeads) {
+		// Nothing has changed since our parent, no new commit needed.
+		trac.tracCommit = trac.parents[0].tracCommit
+	} else {
+		// Generate a new commit that includes our parent(s) and all
+		// our submodules.
+		trac.tracCommit, err = c.newTracCommit(commit, tracs, heads)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	c.add(trac)
 	return trac, nil
+}
+
+func equalSubs(a, b []*Trac) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].hash != b[i].hash {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, heads []*Trac) (*object.Commit, error) {
+	var parents []plumbing.Hash
+
+	// Inherit from our parent tracCommits
+	for _, c := range tracs {
+		parents = append(parents, c.Hash)
+	}
+	// *Also* inherit from the actual submodule heads included in the
+	// current commit
+	for _, h := range heads {
+		parents = append(parents, h.hash)
+	}
+
+	sig := object.Signature{
+		Name:  "git-subtrac",
+		Email: "git-subtrac@",
+		When:  commit.Committer.When,
+	}
+	emptyTree := object.Tree{}
+	nec := c.repo.Storer.NewEncodedObject()
+	err := emptyTree.Encode(nec)
+	if err != nil {
+		return nil, fmt.Errorf("emptyTree.Encode: %v", err)
+	}
+	emptyTreeHash, err := c.repo.Storer.SetEncodedObject(nec)
+	if err != nil {
+		return nil, fmt.Errorf("emptyTree.Store: %v", err)
+	}
+
+	tc := &object.Commit{
+		Author:       sig,
+		Committer:    sig,
+		TreeHash:     emptyTreeHash,
+		ParentHashes: parents,
+		Message:      "[git-subtrac merge]",
+	}
+	nec = c.repo.Storer.NewEncodedObject()
+	err = tc.Encode(nec)
+	if err != nil {
+		return nil, fmt.Errorf("commit.Encode: %v", err)
+	}
+	tch, err := c.repo.Storer.SetEncodedObject(nec)
+	if err != nil {
+		return nil, fmt.Errorf("commit.Store: %v", err)
+	}
+	tc.Hash = tch
+	return tc, nil
 }
 
 func commitPath(path string, sub int) string {
@@ -216,44 +313,53 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	if trac != nil {
 		return trac, nil
 	}
+	trac = &Trac{
+		name: path,
+		hash: tree.Hash,
+	}
 	for _, e := range tree.Entries {
 		if e.Mode == filemode.Submodule {
-			if c.tracs[e.Hash] != nil {
-				// already handled
+			if c.excludes[e.Hash] {
+				// Pretend it doesn't exist; don't link to it.
 				continue
 			}
-			subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
-			sc, err := c.repo.CommitObject(e.Hash)
-			if err != nil {
-				err = c.tryFetchFromSubmodules(subpath, e.Hash)
+			subtrac := c.tracs[e.Hash]
+			if subtrac == nil {
+				subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
+				sc, err := c.repo.CommitObject(e.Hash)
 				if err != nil {
-					return nil, fmt.Errorf("%v (maybe fetch it manually?)", err)
+					err = c.tryFetchFromSubmodules(subpath, e.Hash)
+					if err != nil {
+						return nil, fmt.Errorf("%v (maybe fetch it manually?)", err)
+					}
+				}
+				sc, err = c.repo.CommitObject(e.Hash)
+				if err != nil {
+					return nil, fmt.Errorf("%v: %v",
+						subpath, err)
+				}
+				subtrac, err = c.tracCommit(subpath, sc)
+				if err != nil {
+					return nil, err
 				}
 			}
-			sc, err = c.repo.CommitObject(e.Hash)
-			if err != nil {
-				return nil, fmt.Errorf("%v: %v",
-					subpath, err)
-			}
-			_, err = c.tracCommit(subpath, sc)
-			if err != nil {
-				return nil, err
-			}
+			// Add exactly one submodule.
+			// subtrac.tracCommit includes any submodules which
+			// that submodule itself depends on.
+			trac.subHeads = append(trac.subHeads, subtrac)
 		} else if e.Mode == filemode.Dir {
 			t, err := c.repo.TreeObject(e.Hash)
 			if err != nil {
 				return nil, fmt.Errorf("%v:%.10v: %v",
 					path+e.Name, e.Hash, err)
 			}
-			_, err = c.tracTree(path+e.Name+"/", t)
+			subtrac, err := c.tracTree(path+e.Name+"/", t)
 			if err != nil {
 				return nil, err
 			}
+			// Collect the list of submodules all the way down the tree.
+			trac.subHeads = append(trac.subHeads, subtrac.subHeads...)
 		}
-	}
-	trac = &Trac{
-		name: path,
-		hash: tree.Hash,
 	}
 	c.add(trac)
 	return trac, nil
@@ -301,11 +407,11 @@ func main() {
 		}
 		c := NewCache(*repodir, r, *excludes)
 		refname := args[1]
-		_, err = c.tracByRef(refname)
+		trac, err := c.tracByRef(refname)
 		if err != nil {
 			fatalf("%v\n", err)
 		}
-		fmt.Printf("%v\n", c)
+		fmt.Printf("%v\n", trac.tracCommit.Hash)
 	default:
 		usagef("unknown command %v", args[0])
 	}
