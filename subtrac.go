@@ -52,11 +52,19 @@ type Cache struct {
 	tracs   map[plumbing.Hash]*Trac
 }
 
-func NewCache(rdir string, r *git.Repository) *Cache {
+func NewCache(rdir string, r *git.Repository, excludes []string) *Cache {
 	c := Cache{
 		repoDir: rdir,
 		repo:    r,
 		tracs:   make(map[plumbing.Hash]*Trac),
+	}
+	for _, x := range excludes {
+		hash := plumbing.NewHash(x)
+		trac := &Trac{
+			name: "[excluded]",
+			hash: hash,
+		}
+		c.add(trac)
 	}
 	return &c
 }
@@ -143,7 +151,7 @@ func commitPath(path string, sub int) string {
 }
 
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
-	debugf("Searching submodules for: %.10v %v\n", hash, path)
+	debugf("Searching submodules for: %v\n", path)
 	wt, err := c.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("git worktree: %v", err)
@@ -200,7 +208,7 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("%v: %.10v not found.", path, hash)
+	return fmt.Errorf("%v: %v not found.", path, hash)
 }
 
 func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
@@ -210,6 +218,10 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	}
 	for _, e := range tree.Entries {
 		if e.Mode == filemode.Submodule {
+			if c.tracs[e.Hash] != nil {
+				// already handled
+				continue
+			}
 			subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
 			sc, err := c.repo.CommitObject(e.Hash)
 			if err != nil {
@@ -269,6 +281,7 @@ func main() {
 	log.SetFlags(0)
 
 	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
+	excludes := getopt.ListLong("exclude", 'x', "", "commitids to exclude")
 	getopt.Parse()
 
 	r, err := git.PlainOpen(*repodir)
@@ -286,7 +299,7 @@ func main() {
 		if len(args) != 2 {
 			usagef("command cid takes exactly 1 argument")
 		}
-		c := NewCache(*repodir, r)
+		c := NewCache(*repodir, r, *excludes)
 		refname := args[1]
 		_, err = c.tracByRef(refname)
 		if err != nil {
