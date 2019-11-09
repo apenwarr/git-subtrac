@@ -2,27 +2,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/pborman/getopt/v2"
 	"gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/config"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/filemode"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
-	"log"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 )
-
-func debugf(fmt string, args ...interface{}) {
-	log.Printf(fmt, args...)
-}
-
-func fatalf(fmt string, args ...interface{}) {
-	log.Fatalf("git-subtrac: "+fmt, args...)
-}
 
 type Trac struct {
 	name       string
@@ -48,14 +37,17 @@ func (t Trac) String() string {
 }
 
 type Cache struct {
+	debugf   func(fmt string, args ...interface{})
 	repoDir  string
 	repo     *git.Repository
 	excludes map[plumbing.Hash]bool
 	tracs    map[plumbing.Hash]*Trac
 }
 
-func NewCache(rdir string, r *git.Repository, excludes []string) *Cache {
+func NewCache(rdir string, r *git.Repository, excludes []string,
+	debugf func(fmt string, args ...interface{})) *Cache {
 	c := Cache{
+		debugf:   debugf,
 		repoDir:  rdir,
 		repo:     r,
 		excludes: make(map[plumbing.Hash]bool),
@@ -85,7 +77,7 @@ func (c *Cache) String() string {
 	return strings.Join(out, "\n")
 }
 
-func (c *Cache) tracByRef(refname string) (*Trac, error) {
+func (c *Cache) TracByRef(refname string) (*object.Commit, error) {
 	h, err := c.repo.ResolveRevision(plumbing.Revision(refname))
 	if err != nil {
 		return nil, fmt.Errorf("%v: %v", refname, err)
@@ -94,7 +86,11 @@ func (c *Cache) tracByRef(refname string) (*Trac, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%v: %v", refname, err)
 	}
-	return c.tracCommit(refname, commit)
+	tc, err := c.tracCommit(refname, commit)
+	if err != nil || tc == nil {
+		return nil, err
+	}
+	return tc.tracCommit, nil
 }
 
 // Mercifully, git's content-addressable storage means there are never
@@ -248,7 +244,7 @@ func commitPath(path string, sub int) string {
 }
 
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
-	debugf("Searching submodules for: %v\n", path)
+	c.debugf("Searching submodules for: %v\n", path)
 	wt, err := c.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("git worktree: %v", err)
@@ -265,7 +261,7 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 		}
 		_, err = subr.CommitObject(hash)
 		if err != nil {
-			debugf("  ...not in %v\n", subpath)
+			c.debugf("  ...not in %v\n", subpath)
 			continue
 		}
 		brname := fmt.Sprintf("subtrac-tmp-%v", hash)
@@ -366,53 +362,6 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 }
 
 func (c *Cache) add(trac *Trac) {
-	debugf("  add %.10v %v\n", trac.hash, trac.name)
+	c.debugf("  add %.10v %v\n", trac.hash, trac.name)
 	c.tracs[trac.hash] = trac
-}
-
-var usage_str = `
-Usage: %v [-d GIT_DIR] <command>
-
-Commands:
-    cid <ref>    Generate a tracking commit id based on the given ref
-`
-
-func usagef(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, usage_str[1:], os.Args[0])
-	fmt.Fprintf(os.Stderr, "\nfatal: "+format+"\n", args...)
-	os.Exit(99)
-}
-
-func main() {
-	log.SetFlags(0)
-
-	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
-	excludes := getopt.ListLong("exclude", 'x', "", "commitids to exclude")
-	getopt.Parse()
-
-	r, err := git.PlainOpen(*repodir)
-	if err != nil {
-		fatalf("git: %v: %v\n", repodir, err)
-	}
-
-	args := getopt.Args()
-	if len(args) < 1 {
-		usagef("no command specified.")
-	}
-
-	switch args[0] {
-	case "cid":
-		if len(args) != 2 {
-			usagef("command cid takes exactly 1 argument")
-		}
-		c := NewCache(*repodir, r, *excludes)
-		refname := args[1]
-		trac, err := c.tracByRef(refname)
-		if err != nil {
-			fatalf("%v\n", err)
-		}
-		fmt.Printf("%v\n", trac.tracCommit.Hash)
-	default:
-		usagef("unknown command %v", args[0])
-	}
 }

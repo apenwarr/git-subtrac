@@ -1,4 +1,4 @@
-module github.com/apenwarr/git_subtrac
+module github.com/apenwarr/git-subtrac
 
 go 1.12
 
