@@ -37,21 +37,24 @@ func (t Trac) String() string {
 }
 
 type Cache struct {
-	debugf   func(fmt string, args ...interface{})
-	repoDir  string
-	repo     *git.Repository
-	excludes map[plumbing.Hash]bool
-	tracs    map[plumbing.Hash]*Trac
+	debugf      func(fmt string, args ...interface{})
+	repoDir     string
+	repo        *git.Repository
+	autoexclude bool
+	excludes    map[plumbing.Hash]bool
+	tracs       map[plumbing.Hash]*Trac
 }
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
+	autoexclude bool,
 	debugf func(fmt string, args ...interface{})) *Cache {
 	c := Cache{
-		debugf:   debugf,
-		repoDir:  rdir,
-		repo:     r,
-		excludes: make(map[plumbing.Hash]bool),
-		tracs:    make(map[plumbing.Hash]*Trac),
+		debugf:      debugf,
+		repoDir:     rdir,
+		repo:        r,
+		autoexclude: autoexclude,
+		excludes:    make(map[plumbing.Hash]bool),
+		tracs:       make(map[plumbing.Hash]*Trac),
 	}
 	for _, x := range excludes {
 		hash := plumbing.NewHash(x)
@@ -75,6 +78,49 @@ func (c *Cache) String() string {
 		out = append(out, v.String())
 	}
 	return strings.Join(out, "\n")
+}
+
+func (c *Cache) UpdateBranchRefs() error {
+	branchIter, err := c.repo.Branches()
+	if err != nil {
+		return fmt.Errorf("GetBranches: %v", err)
+	}
+
+	var branches []*plumbing.Reference
+	var commits []*object.Commit
+	err = branchIter.ForEach(func(b *plumbing.Reference) error {
+		name := string(b.Name())
+		if strings.HasSuffix(name, ".trac") {
+			return nil
+		}
+		c.debugf("Scanning branch: %v\n", name)
+		commit, err := c.TracByRef(name)
+		if err != nil {
+			return err
+		} else {
+			branches = append(branches, b)
+			commits = append(commits, commit)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for i := range branches {
+		newname := string(branches[i].Name()) + ".trac"
+		hash := commits[i].Hash
+		c.debugf("Updating %.10v -> %v\n", hash, newname)
+
+		refname := plumbing.ReferenceName(newname)
+		ref := plumbing.NewHashReference(refname, hash)
+		err = c.repo.Storer.SetReference(ref)
+		if err != nil {
+			return fmt.Errorf("update %v: %v", refname, err)
+		}
+	}
+
+	return nil
 }
 
 func (c *Cache) TracByRef(refname string) (*object.Commit, error) {
@@ -326,6 +372,9 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 				if err != nil {
 					err = c.tryFetchFromSubmodules(subpath, e.Hash)
 					if err != nil {
+						if c.autoexclude {
+							continue
+						}
 						return nil, fmt.Errorf("%v (maybe fetch it manually?)", err)
 					}
 				}

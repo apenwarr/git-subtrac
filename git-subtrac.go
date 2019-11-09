@@ -21,6 +21,7 @@ Usage: %v [-d GIT_DIR] <command>
 
 Commands:
     cid <ref>    Generate a tracking commit id based on the given ref
+    update       Update all local branches with a matching *.trac branch
 `
 
 func usagef(format string, args ...interface{}) {
@@ -34,6 +35,7 @@ func main() {
 
 	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
 	excludes := getopt.ListLong("exclude", 'x', "", "commitids to exclude")
+	autoexclude := getopt.BoolLong("auto-exclude", 0, "auto exclude missing commits")
 	getopt.Parse()
 
 	r, err := git.PlainOpen(*repodir)
@@ -46,12 +48,21 @@ func main() {
 		usagef("no command specified.")
 	}
 
+	c := NewCache(*repodir, r, *excludes, *autoexclude, debugf)
+
 	switch args[0] {
+	case "update":
+		if len(args) != 1 {
+			usagef("command 'update' takes no arguments")
+		}
+		err := c.UpdateBranchRefs()
+		if err != nil {
+			fatalf("%v\n", err)
+		}
 	case "cid":
 		if len(args) != 2 {
-			usagef("command cid takes exactly 1 argument")
+			usagef("command 'cid' takes exactly 1 argument")
 		}
-		c := NewCache(*repodir, r, *excludes, debugf)
 		refname := args[1]
 		trac, err := c.TracByRef(refname)
 		if err != nil {
