@@ -8,6 +8,8 @@ import (
 	"gopkg.in/src-d/go-git.v4/plumbing/filemode"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"log"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -55,8 +57,17 @@ func NewCache(r *git.Repository) *Cache {
 }
 
 func (c *Cache) String() string {
-	var out []string
+	var l []*Trac
 	for _, v := range c.tracs {
+		l = append(l, v)
+	}
+
+	sort.Slice(l, func(i, j int) bool {
+		return l[i].name < l[j].name
+	})
+
+	var out []string
+	for _, v := range l {
 		out = append(out, v.String())
 	}
 	return strings.Join(out, "\n")
@@ -72,41 +83,57 @@ func (c *Cache) tracByRef(refname string) (*Trac, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.tracCommit(commit)
+	return c.tracCommit(refname, commit)
 }
 
 // Mercifully, git's content-addressable storage means there are never
 // any cycles when traversing the commit+submodule hierarchy, although the
 // same sub-objects may occur many times at different points in the tree.
-func (c *Cache) tracCommit(commit *object.Commit) (*Trac, error) {
+func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 	trac := c.tracs[commit.Hash]
 	if trac != nil {
 		return trac, nil
 	}
 	trac = &Trac{
-		name: "<COMMIT>",
+		name: path,
 		hash: commit.Hash,
 	}
 	tree, err := commit.Tree()
 	if err != nil {
-		return nil, fmt.Errorf("%.10v.Tree: %v", commit.Hash, err)
+		return nil, fmt.Errorf("%v:%.10v: %v", path, commit.Hash, err)
 	}
-	_, err = c.tracTree("<ROOT>", tree)
+	_, err = c.tracTree(path+"/", tree)
 	if err != nil {
-		return nil, fmt.Errorf("%.10v.addTree: %v", commit.Hash, err)
+		return nil, err
 	}
-	for _, parent := range commit.ParentHashes {
+	for i, parent := range commit.ParentHashes {
 		pc, err := c.repo.CommitObject(parent)
 		if err != nil {
-			return nil, fmt.Errorf("%.10v: %v", pc.Hash, err)
+			return nil, fmt.Errorf("%v:%.10v: %v", path, pc.Hash, err)
 		}
-		_, err = c.tracCommit(pc)
+		np := commitPath(path, i+1)
+		_, err = c.tracCommit(np, pc)
 	}
 	c.tracs[commit.Hash] = trac
 	return trac, nil
 }
 
-func (c *Cache) tracTree(name string, tree *object.Tree) (*Trac, error) {
+func commitPath(path string, sub int) string {
+	if sub != 1 {
+		return fmt.Sprintf("%s^%d", path, sub)
+	}
+	ix := strings.LastIndexByte(path, '~')
+	if ix < 0 {
+		return fmt.Sprintf("%s~1", path)
+	}
+	v, err := strconv.Atoi(path[ix+1:])
+	if err != nil {
+		return fmt.Sprintf("%s~1", path)
+	}
+	return fmt.Sprintf("%s~%d", path[:ix], v+1)
+}
+
+func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	trac := c.tracs[tree.Hash]
 	if trac != nil {
 		return trac, nil
@@ -117,18 +144,17 @@ func (c *Cache) tracTree(name string, tree *object.Tree) (*Trac, error) {
 		} else if e.Mode == filemode.Dir {
 			t, err := c.repo.TreeObject(e.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("%.10v.Tree.%.10v: %v",
-					tree.Hash, e.Hash, err)
+				return nil, fmt.Errorf("%v:%.10v: %v",
+					path, e.Hash, err)
 			}
-			_, err = c.tracTree(e.Name, t)
+			_, err = c.tracTree(path+e.Name+"/", t)
 			if err != nil {
-				return nil, fmt.Errorf("%.10v.addTree: %v",
-					t.Hash, err)
+				return nil, err
 			}
 		}
 	}
 	trac = &Trac{
-		name: name,
+		name: path,
 		hash: tree.Hash,
 	}
 	c.tracs[tree.Hash] = trac
@@ -145,7 +171,7 @@ func main() {
 	refname := "junk"
 	_, err = c.tracByRef(refname)
 	if err != nil {
-		fatalf("AddByRef: %v: %v\n", refname, err)
+		fatalf("AddByRef: %v\n", err)
 	}
 	fmt.Printf("%v\n", c)
 }
