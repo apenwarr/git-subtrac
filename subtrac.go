@@ -38,6 +38,7 @@ func (t Trac) String() string {
 
 type Cache struct {
 	debugf      func(fmt string, args ...interface{})
+	infof       func(fmt string, args ...interface{})
 	repoDir     string
 	repo        *git.Repository
 	autoexclude bool
@@ -47,9 +48,10 @@ type Cache struct {
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
 	autoexclude bool,
-	debugf func(fmt string, args ...interface{})) *Cache {
+	debugf, infof func(fmt string, args ...interface{})) *Cache {
 	c := Cache{
 		debugf:      debugf,
+		infof:       infof,
 		repoDir:     rdir,
 		repo:        r,
 		autoexclude: autoexclude,
@@ -93,7 +95,7 @@ func (c *Cache) UpdateBranchRefs() error {
 		if strings.HasSuffix(name, ".trac") {
 			return nil
 		}
-		c.debugf("Scanning branch: %v\n", name)
+		c.infof("Scanning branch: %v\n", name)
 		commit, err := c.TracByRef(name)
 		if err != nil {
 			return err
@@ -110,7 +112,7 @@ func (c *Cache) UpdateBranchRefs() error {
 	for i := range branches {
 		newname := string(branches[i].Name()) + ".trac"
 		hash := commits[i].Hash
-		c.debugf("Updating %.10v -> %v\n", hash, newname)
+		c.infof("Updating %.10v -> %v\n", hash, newname)
 
 		refname := plumbing.ReferenceName(newname)
 		ref := plumbing.NewHashReference(refname, hash)
@@ -290,7 +292,7 @@ func commitPath(path string, sub int) string {
 }
 
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
-	c.debugf("Searching submodules for: %v\n", path)
+	c.infof("Searching submodules for: %v\n", path)
 	wt, err := c.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("git worktree: %v", err)
@@ -307,9 +309,10 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 		}
 		_, err = subr.CommitObject(hash)
 		if err != nil {
-			c.debugf("  ...not in %v\n", subpath)
+			c.infof("  ...not in %v\n", subpath)
 			continue
 		}
+		c.infof("  ...found! in %v\n", subpath)
 		brname := fmt.Sprintf("subtrac-tmp-%v", hash)
 		brrefname := plumbing.NewBranchReferenceName(brname)
 		ref := plumbing.NewHashReference(brrefname, hash)

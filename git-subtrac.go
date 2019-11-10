@@ -8,10 +8,6 @@ import (
 	"os"
 )
 
-func debugf(fmt string, args ...interface{}) {
-	log.Printf(fmt, args...)
-}
-
 func fatalf(fmt string, args ...interface{}) {
 	log.Fatalf("git-subtrac: "+fmt, args...)
 }
@@ -32,10 +28,12 @@ func usagef(format string, args ...interface{}) {
 
 func main() {
 	log.SetFlags(0)
+	infof := log.Printf
 
 	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
 	excludes := getopt.ListLong("exclude", 'x', "", "commitids to exclude")
 	autoexclude := getopt.BoolLong("auto-exclude", 0, "auto exclude missing commits")
+	verbose := getopt.BoolLong("verbose", 'v', "verbose mode")
 	getopt.Parse()
 
 	r, err := git.PlainOpen(*repodir)
@@ -48,7 +46,13 @@ func main() {
 		usagef("no command specified.")
 	}
 
-	c := NewCache(*repodir, r, *excludes, *autoexclude, debugf)
+	var debugf func(fmt string, args ...interface{})
+	if *verbose {
+		debugf = infof
+	} else {
+		debugf = func(fmt string, args ...interface{}) {}
+	}
+	c := NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
 
 	switch args[0] {
 	case "update":
