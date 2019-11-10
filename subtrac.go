@@ -60,7 +60,7 @@ func NewCache(rdir string, r *git.Repository, excludes []string,
 	}
 	for _, x := range excludes {
 		hash := plumbing.NewHash(x)
-		c.excludes[hash] = true
+		c.exclude(hash)
 	}
 	return &c
 }
@@ -80,6 +80,13 @@ func (c *Cache) String() string {
 		out = append(out, v.String())
 	}
 	return strings.Join(out, "\n")
+}
+
+func (c *Cache) exclude(hash plumbing.Hash) {
+	if !c.excludes[hash] {
+		c.excludes[hash] = true
+		c.infof("Excluding %v\n", hash)
+	}
 }
 
 func (c *Cache) UpdateBranchRefs() error {
@@ -376,9 +383,10 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 					err = c.tryFetchFromSubmodules(subpath, e.Hash)
 					if err != nil {
 						if c.autoexclude {
+							c.exclude(e.Hash)
 							continue
 						}
-						return nil, fmt.Errorf("%v (maybe fetch it manually?)", err)
+						return nil, fmt.Errorf("%v (fetch it manually? or try --exclude)", err)
 					}
 				}
 				sc, err = c.repo.CommitObject(e.Hash)
