@@ -79,7 +79,7 @@ major design issues:
   the subprojects. To make that work, all of git was designed to not mess
   with submodule links when you do regular operations, and to not abort when
   submodule links go missing. So it's super easy to make a mistake like
-  forgetting to push you changes to a submodule when you push a change to
+  forgetting to push your changes to a submodule when you push a change to
   the parent project, thus making it so nobody else can check out your
   parent code anymore.
 
