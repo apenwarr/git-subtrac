@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/pborman/getopt/v2"
+	"github.com/pborman/getopt"
 	"gopkg.in/src-d/go-git.v4"
 	"log"
 	"os"
@@ -13,15 +13,19 @@ func fatalf(fmt string, args ...interface{}) {
 }
 
 var usage_str = `
-Usage: %v [-d GIT_DIR] <command>
-
 Commands:
-    cid <ref>    Generate a tracking commit id based on the given ref
+    cid <ref>    Print the id of a tracking commit based on the given ref
     update       Update all local branches with a matching *.trac branch
 `
 
+func usage() {
+	fmt.Fprintf(os.Stderr, "\n")
+	getopt.PrintUsage(os.Stderr)
+	fmt.Fprintf(os.Stderr, usage_str)
+}
+
 func usagef(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, usage_str[1:], os.Args[0])
+	usage()
 	fmt.Fprintf(os.Stderr, "\nfatal: "+format+"\n", args...)
 	os.Exit(99)
 }
@@ -30,8 +34,9 @@ func main() {
 	log.SetFlags(0)
 	infof := log.Printf
 
-	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo")
-	excludes := getopt.ListLong("exclude", 'x', "", "commitids to exclude")
+	getopt.SetUsage(usage)
+	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo", "GIT_DIR")
+	excludes := getopt.ListLong("exclude", 'x', "commitids to exclude", "commitids...")
 	autoexclude := getopt.BoolLong("auto-exclude", 0, "auto exclude missing commits")
 	verbose := getopt.BoolLong("verbose", 'v', "verbose mode")
 	getopt.Parse()
@@ -52,6 +57,7 @@ func main() {
 	} else {
 		debugf = func(fmt string, args ...interface{}) {}
 	}
+
 	c := NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
 
 	switch args[0] {
