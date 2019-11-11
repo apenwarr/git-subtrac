@@ -321,25 +321,58 @@ func commitPath(path string, sub int) string {
 	return fmt.Sprintf("%s~%d", path[:ix], v+1)
 }
 
+// Recursively open all submodule repositories, starting at c.repo, and
+// return a list of them.
+func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err error) {
+	var expand func(string, *git.Repository) error
+	expand = func(path string, r *git.Repository) error {
+		wt, err := r.Worktree()
+		if err != nil {
+			return fmt.Errorf("git worktree(%s): %v", path, err)
+		}
+		subs, err := wt.Submodules()
+		if err != nil {
+			return fmt.Errorf("git submodules(%s): %v", path, subs)
+		}
+		for _, sub := range subs {
+			subpath := path
+			if subpath != "" {
+				subpath += "/modules/"
+			}
+			subpath += sub.Config().Path
+			subr, err := sub.Repository()
+			if err != nil {
+				return fmt.Errorf("git repo(%v): %v", subpath, err)
+			}
+			paths = append(paths, subpath)
+			repos = append(repos, subr)
+			err = expand(subpath, subr)
+			if err != nil {
+				return nil
+			}
+		}
+		return nil
+	}
+
+	err = expand("", c.repo)
+	if err != nil {
+		return nil, nil, err
+	}
+	return paths, repos, nil
+}
+
 // Try to find a given commit object in all submodule repositories. If it
 // exists, 'git fetch' it into the main repository so we can refer to it
 // as a parent of our synthetic commits.
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 	c.infof("Searching submodules for: %v\n", path)
-	wt, err := c.repo.Worktree()
+	paths, repos, err := c.allSubrepos()
 	if err != nil {
-		return fmt.Errorf("git worktree: %v", err)
+		return err
 	}
-	subs, err := wt.Submodules()
-	if err != nil {
-		return fmt.Errorf("git submodules: %v", subs)
-	}
-	for _, sub := range subs {
-		subpath := sub.Config().Path
-		subr, err := sub.Repository()
-		if err != nil {
-			return fmt.Errorf("submodule %v: %v", subpath, err)
-		}
+	for i := range repos {
+		subpath := paths[i]
+		subr := repos[i]
 		_, err = subr.CommitObject(hash)
 		if err != nil {
 			c.infof("  ...not in %v\n", subpath)
@@ -354,8 +387,9 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 		if err != nil {
 			return fmt.Errorf("submodule %v: create %v: %v", subpath, ref, err)
 		}
-		remotename := fmt.Sprintf("%v/.git/modules/%v",
-			c.repoDir, sub.Config().Name)
+		// TODO(apenwarr): go-git should provide this path?
+		//  Maybe it does, but I can't figure out where.
+		remotename := fmt.Sprintf("%v/.git/modules/%v", c.repoDir, subpath)
 		absremotename, err := filepath.Abs(remotename)
 		if err != nil {
 			return fmt.Errorf("AbsPath(%v): %v", remotename, err)
