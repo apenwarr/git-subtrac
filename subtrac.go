@@ -220,6 +220,12 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 		if !seenHeads[h.hash] {
 			seenHeads[h.hash] = true
 			newHeads = append(newHeads, h)
+			if h.tracCommit != nil {
+				if !seenTracs[h.tracCommit.Hash] {
+					seenTracs[h.tracCommit.Hash] = true
+					tracs = append(tracs, h.tracCommit)
+				}
+			}
 		}
 	}
 
