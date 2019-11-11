@@ -200,15 +200,9 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 
 	seenHeads := make(map[plumbing.Hash]bool)
 	seenTracs := make(map[plumbing.Hash]bool)
-	var heads []*Trac
+	var newHeads []*Trac
 	var tracs []*object.Commit
 
-	for _, h := range trac.subHeads {
-		if !seenHeads[h.hash] {
-			seenHeads[h.hash] = true
-			heads = append(heads, h)
-		}
-	}
 	for _, p := range trac.parents {
 		if p.tracCommit != nil {
 			if !seenTracs[p.tracCommit.Hash] {
@@ -216,15 +210,28 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 				tracs = append(tracs, p.tracCommit)
 			}
 		}
+		for _, h := range p.subHeads {
+			// parent tracCommit already includes this subHead,
+			// so we don't need to include it again.
+			seenHeads[h.hash] = true
+		}
+	}
+	for _, h := range trac.subHeads {
+		if !seenHeads[h.hash] {
+			seenHeads[h.hash] = true
+			newHeads = append(newHeads, h)
+		}
 	}
 
-	if len(trac.parents) == 1 && equalSubs(trac.subHeads, trac.parents[0].subHeads) {
-		// Nothing has changed since our parent, no new commit needed.
-		trac.tracCommit = trac.parents[0].tracCommit
+	if len(newHeads) == 0 && len(tracs) <= 1 {
+		if len(tracs) == 1 {
+			// Nothing added since our parent, no new commit needed.
+			trac.tracCommit = tracs[0]
+		}
 	} else {
-		// Generate a new commit that includes our parent(s) and all
-		// our submodules.
-		trac.tracCommit, err = c.newTracCommit(commit, tracs, heads)
+		// Generate a new commit that includes our parent(s) and our
+		// new submodules.
+		trac.tracCommit, err = c.newTracCommit(commit, tracs, newHeads)
 		if err != nil {
 			return nil, err
 		}
@@ -279,12 +286,13 @@ func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, hea
 		return nil, fmt.Errorf("emptyTree.Store: %v", err)
 	}
 
+	msg := fmt.Sprintf("[git-subtrac for %v]", commit.Hash)
 	tc := &object.Commit{
 		Author:       sig,
 		Committer:    sig,
 		TreeHash:     emptyTreeHash,
 		ParentHashes: parents,
-		Message:      "[git-subtrac merge]",
+		Message:      msg,
 	}
 	nec = c.repo.Storer.NewEncodedObject()
 	err = tc.Encode(nec)
