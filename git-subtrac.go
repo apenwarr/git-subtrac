@@ -14,8 +14,9 @@ func fatalf(fmt string, args ...interface{}) {
 
 var usage_str = `
 Commands:
-    cid <ref>    Print the id of a tracking commit based on the given ref
-    update       Update all local branches with a matching *.trac branch
+    cid <ref>       Print the id of a tracking commit based on the given ref
+    dump <refs...>  Print the cache after loading the given branch ref(s)
+    update          Update all local branches with a matching *.trac branch
 `
 
 func usage() {
@@ -79,6 +80,17 @@ func main() {
 			fatalf("%v\n", err)
 		}
 		fmt.Printf("%v\n", trac.Hash)
+	case "dump":
+		if len(args) < 2 {
+			usagef("command 'dump' takes at least 1 argument")
+		}
+		for _, refname := range args[1:] {
+			_, err := c.TracByRef(refname)
+			if err != nil {
+				fatalf("%v\n", err)
+			}
+		}
+		fmt.Printf("%v\n", c)
 	default:
 		usagef("unknown command %v", args[0])
 	}
