@@ -140,6 +140,8 @@ func (c *Cache) UpdateBranchRefs() error {
 		commit, err := c.TracByRef(name)
 		if err != nil {
 			return err
+		} else if commit == nil {
+			c.infof("Warning: no submodule commits found for %v; skipping.\n", name)
 		} else {
 			branches = append(branches, b)
 			commits = append(commits, commit)
@@ -149,10 +151,14 @@ func (c *Cache) UpdateBranchRefs() error {
 	if err != nil {
 		return err
 	}
+	if len(branches) != len(commits) {
+		return fmt.Errorf("weird: branches=%d commits=%d", len(branches), len(commits))
+	}
 
 	for i := range branches {
 		newname := string(branches[i].Name()) + ".trac"
-		hash := commits[i].Hash
+		cc := commits[i]
+		hash := cc.Hash
 		c.infof("Updating %.10v -> %v\n", hash, newname)
 
 		refname := plumbing.ReferenceName(newname)
