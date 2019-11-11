@@ -59,7 +59,10 @@ func main() {
 		debugf = func(fmt string, args ...interface{}) {}
 	}
 
-	c := NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
+	c, err := NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
+	if err != nil {
+		fatalf("NewCache: %v\n", err)
+	}
 
 	switch args[0] {
 	case "update":

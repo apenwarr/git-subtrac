@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/config"
@@ -51,7 +52,7 @@ type Cache struct {
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
 	autoexclude bool,
-	debugf, infof func(fmt string, args ...interface{})) *Cache {
+	debugf, infof func(fmt string, args ...interface{})) (*Cache, error) {
 	c := Cache{
 		debugf:      debugf,
 		infof:       infof,
@@ -61,11 +62,40 @@ func NewCache(rdir string, r *git.Repository, excludes []string,
 		excludes:    make(map[plumbing.Hash]bool),
 		tracs:       make(map[plumbing.Hash]*Trac),
 	}
+
 	for _, x := range excludes {
 		hash := plumbing.NewHash(x)
 		c.exclude(hash)
 	}
-	return &c
+
+	wt, err := r.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("git worktree: %v", err)
+	}
+	f, err := wt.Filesystem.Open(".trac-excludes")
+	if err == nil { // file might not exist, but that's ok
+		r := bufio.NewReader(f)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				break
+			}
+			// trim comments
+			pos := strings.Index(line, "#")
+			if pos >= 0 {
+				line = line[:pos]
+			}
+			// trim whitespace
+			line = strings.TrimSpace(line)
+
+			if line != "" {
+				hash := plumbing.NewHash(line)
+				c.exclude(hash)
+			}
+		}
+	}
+
+	return &c, nil
 }
 
 func (c *Cache) String() string {
@@ -89,7 +119,6 @@ func (c *Cache) String() string {
 func (c *Cache) exclude(hash plumbing.Hash) {
 	if !c.excludes[hash] {
 		c.excludes[hash] = true
-		c.infof("Excluding %v\n", hash)
 	}
 }
 
@@ -460,6 +489,7 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 					err = c.tryFetchFromSubmodules(subpath, e.Hash)
 					if err != nil {
 						if c.autoexclude {
+							c.infof("Excluding %v\n", e.Hash)
 							c.exclude(e.Hash)
 							continue
 						}
