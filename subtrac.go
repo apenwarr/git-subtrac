@@ -13,12 +13,15 @@ import (
 	"strings"
 )
 
+// A Trac represents a commit or tree somewhere in the project's hierarchy,
+// including submodules. If one of its children contains submodules,
+// subHeads and tracCommit will be populated.
 type Trac struct {
-	name       string
-	hash       plumbing.Hash
-	parents    []*Trac
-	subHeads   []*Trac
-	tracCommit *object.Commit
+	name       string         // a human-readable path to this object
+	hash       plumbing.Hash  // the git hash of this object
+	parents    []*Trac        // parent commits (if this is a commit)
+	subHeads   []*Trac        // submodule commits contained by this
+	tracCommit *object.Commit // synthetic commit with parents+subHeads
 }
 
 func (t Trac) String() string {
@@ -39,11 +42,11 @@ func (t Trac) String() string {
 type Cache struct {
 	debugf      func(fmt string, args ...interface{})
 	infof       func(fmt string, args ...interface{})
-	repoDir     string
-	repo        *git.Repository
-	autoexclude bool
-	excludes    map[plumbing.Hash]bool
-	tracs       map[plumbing.Hash]*Trac
+	repoDir     string                  // toplevel repo dir
+	repo        *git.Repository         // open copy of the toplevel repo
+	autoexclude bool                    // --auto-exclude enabled
+	excludes    map[plumbing.Hash]bool  // specifically excluded objects
+	tracs       map[plumbing.Hash]*Trac // object lookup cache
 }
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
@@ -82,6 +85,7 @@ func (c *Cache) String() string {
 	return strings.Join(out, "\n")
 }
 
+// Add one commit to the exclusion list.
 func (c *Cache) exclude(hash plumbing.Hash) {
 	if !c.excludes[hash] {
 		c.excludes[hash] = true
@@ -89,6 +93,7 @@ func (c *Cache) exclude(hash plumbing.Hash) {
 	}
 }
 
+// Load all branches into the cache, and update a .trac ref for each one.
 func (c *Cache) UpdateBranchRefs() error {
 	branchIter, err := c.repo.Branches()
 	if err != nil {
@@ -132,6 +137,7 @@ func (c *Cache) UpdateBranchRefs() error {
 	return nil
 }
 
+// Generate a synthetic commit for the given ref.
 func (c *Cache) TracByRef(refname string) (*object.Commit, error) {
 	h, err := c.repo.ResolveRevision(plumbing.Revision(refname))
 	if err != nil {
@@ -148,6 +154,12 @@ func (c *Cache) TracByRef(refname string) (*object.Commit, error) {
 	return tc.tracCommit, nil
 }
 
+// Starting at the given commit, load all its recursive parents and
+// submodule references into the cache, returning the cache entry.
+//
+// This doesn't update any references in the repo itself, it just returns a
+// new object representing the commit, including its synthetic trac commit.
+//
 // Mercifully, git's content-addressable storage means there are never
 // any cycles when traversing the commit+submodule hierarchy, although the
 // same sub-objects may occur many times at different points in the tree.
@@ -222,6 +234,7 @@ func (c *Cache) tracCommit(path string, commit *object.Commit) (*Trac, error) {
 	return trac, nil
 }
 
+// True if a and b are equal.
 func equalSubs(a, b []*Trac) bool {
 	if len(a) != len(b) {
 		return false
@@ -234,6 +247,9 @@ func equalSubs(a, b []*Trac) bool {
 	return true
 }
 
+// Given a list of parents and submodules for a given real git commit,
+// produce a synthetic trac commit that includes all parents and submodules,
+// but not the commit itself.
 func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, heads []*Trac) (*object.Commit, error) {
 	var parents []plumbing.Hash
 
@@ -283,6 +299,13 @@ func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, hea
 	return tc, nil
 }
 
+// Update a "commit path" which represents how we get to a given commit
+// from a starting point. So if the starting point is "master^2~25, and sub is
+// 1, the result is master^2~26. If sub is 3, the result is master^2~25^3, and
+// so on.
+//
+// These paths look weird but are valid git syntax, and are somewhat human-
+// friendly once you get used to them.
 func commitPath(path string, sub int) string {
 	if sub != 1 {
 		return fmt.Sprintf("%s^%d", path, sub)
@@ -298,6 +321,9 @@ func commitPath(path string, sub int) string {
 	return fmt.Sprintf("%s~%d", path[:ix], v+1)
 }
 
+// Try to find a given commit object in all submodule repositories. If it
+// exists, 'git fetch' it into the main repository so we can refer to it
+// as a parent of our synthetic commits.
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 	c.infof("Searching submodules for: %v\n", path)
 	wt, err := c.repo.Worktree()
@@ -360,6 +386,9 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 	return fmt.Errorf("%v: %v not found.", path, hash)
 }
 
+// Starting from a given git tree object, recursively add all its subtree
+// and submodules into the cache, returning the cache object representing
+// this tree.
 func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	trac := c.tracs[tree.Hash]
 	if trac != nil {
@@ -421,6 +450,7 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 	return trac, nil
 }
 
+// Add a given entry into the cache.
 func (c *Cache) add(trac *Trac) {
 	c.debugf("  add %.10v %v\n", trac.hash, trac.name)
 	c.tracs[trac.hash] = trac
