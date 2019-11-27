@@ -48,6 +48,8 @@ type Cache struct {
 	autoexclude bool                    // --auto-exclude enabled
 	excludes    map[plumbing.Hash]bool  // specifically excluded objects
 	tracs       map[plumbing.Hash]*Trac // object lookup cache
+	srPaths     []string                // subrepo paths cache
+	srRepos     []*git.Repository       // subrepo object cache
 }
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
@@ -373,6 +375,10 @@ func commitPath(path string, sub int) string {
 // Recursively open all submodule repositories, starting at c.repo, and
 // return a list of them.
 func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err error) {
+	if c.srPaths != nil && c.srRepos != nil {
+		return c.srPaths, c.srRepos, nil
+	}
+
 	var recurse func(string, *git.Repository) error
 	recurse = func(path string, r *git.Repository) error {
 		wt, err := r.Worktree()
@@ -419,6 +425,10 @@ func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err erro
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Cache entries for next time
+	c.srPaths = paths
+	c.srRepos = repos
 	return paths, repos, nil
 }
 
