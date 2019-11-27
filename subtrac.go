@@ -388,7 +388,7 @@ func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err erro
 			if subpath != "" {
 				subpath += "/modules/"
 			}
-			subpath += sub.Config().Path
+			subpath += sub.Config().Name
 
 			ss, err := sub.Status()
 			if err != nil {
