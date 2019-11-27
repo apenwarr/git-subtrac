@@ -82,7 +82,9 @@ func main() {
 		if err != nil {
 			fatalf("%v\n", err)
 		}
-		fmt.Printf("%v\n", trac.Hash)
+		if trac != nil {
+			fmt.Printf("%v\n", trac.Hash)
+		}
 	case "dump":
 		if len(args) < 2 {
 			usagef("command 'dump' takes at least 1 argument")

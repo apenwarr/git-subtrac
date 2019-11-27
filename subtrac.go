@@ -373,8 +373,8 @@ func commitPath(path string, sub int) string {
 // Recursively open all submodule repositories, starting at c.repo, and
 // return a list of them.
 func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err error) {
-	var expand func(string, *git.Repository) error
-	expand = func(path string, r *git.Repository) error {
+	var recurse func(string, *git.Repository) error
+	recurse = func(path string, r *git.Repository) error {
 		wt, err := r.Worktree()
 		if err != nil {
 			return fmt.Errorf("git worktree(%s): %v", path, err)
@@ -389,35 +389,51 @@ func (c *Cache) allSubrepos() (paths []string, repos []*git.Repository, err erro
 				subpath += "/modules/"
 			}
 			subpath += sub.Config().Path
+
+			ss, err := sub.Status()
+			if err != nil {
+				return fmt.Errorf("git status(%v): %v", subpath, err)
+			}
+			empty := plumbing.Hash{}
+			if ss.Current == empty {
+				// not currently initialized
+				c.infof("git submodule(%s): not initialized; skipping\n", subpath)
+				continue
+			}
+
 			subr, err := sub.Repository()
 			if err != nil {
 				return fmt.Errorf("git repo(%v): %v", subpath, err)
 			}
 			paths = append(paths, subpath)
 			repos = append(repos, subr)
-			err = expand(subpath, subr)
+			err = recurse(subpath, subr)
 			if err != nil {
-				return nil
+				return err
 			}
 		}
 		return nil
 	}
 
-	err = expand("", c.repo)
+	err = recurse("", c.repo)
 	if err != nil {
 		return nil, nil, err
 	}
 	return paths, repos, nil
 }
 
+type NotPresentError struct{}
+
+var NotPresent = &NotPresentError{}
+
 // Try to find a given commit object in all submodule repositories. If it
 // exists, 'git fetch' it into the main repository so we can refer to it
 // as a parent of our synthetic commits.
-func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
+func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) (*NotPresentError, error) {
 	c.infof("Searching submodules for: %v\n", path)
 	paths, repos, err := c.allSubrepos()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for i := range repos {
 		subpath := paths[i]
@@ -434,21 +450,21 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 		err = subr.Storer.SetReference(ref)
 		defer subr.Storer.RemoveReference(brrefname)
 		if err != nil {
-			return fmt.Errorf("submodule %v: create %v: %v", subpath, ref, err)
+			return nil, fmt.Errorf("submodule %v: create %v: %v", subpath, ref, err)
 		}
 		// TODO(apenwarr): go-git should provide this path?
 		//  Maybe it does, but I can't figure out where.
 		remotename := fmt.Sprintf("%v/.git/modules/%v", c.repoDir, subpath)
 		absremotename, err := filepath.Abs(remotename)
 		if err != nil {
-			return fmt.Errorf("AbsPath(%v): %v", remotename, err)
+			return nil, fmt.Errorf("AbsPath(%v): %v", remotename, err)
 		}
 		remote, err := c.repo.CreateRemoteAnonymous(&config.RemoteConfig{
 			Name: "anonymous",
 			URLs: []string{absremotename},
 		})
 		if err != nil {
-			return fmt.Errorf("submodule %v: CreateRemote: %v", absremotename, err)
+			return nil, fmt.Errorf("submodule %v: CreateRemote: %v", absremotename, err)
 		}
 		err = remote.Fetch(&git.FetchOptions{
 			RemoteName: "anonymous",
@@ -457,16 +473,16 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) error {
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("submodule %v: fetch: %v", absremotename, err)
+			return nil, fmt.Errorf("submodule %v: fetch: %v", absremotename, err)
 		}
 		// Fetch worked!
 		err = subr.Storer.RemoveReference(brrefname)
 		if err != nil {
-			return fmt.Errorf("submodule %v: remove %v: %v", subpath, ref, err)
+			return nil, fmt.Errorf("submodule %v: remove %v: %v", subpath, ref, err)
 		}
-		return nil
+		return nil, nil
 	}
-	return fmt.Errorf("%v: %v not found.", path, hash)
+	return NotPresent, fmt.Errorf("%v: %v not found.", path, hash)
 }
 
 // Starting from a given git tree object, recursively add all its subtree
@@ -492,13 +508,13 @@ func (c *Cache) tracTree(path string, tree *object.Tree) (*Trac, error) {
 				subpath := fmt.Sprintf("%s%s@%.10v", path, e.Name, e.Hash)
 				sc, err := c.repo.CommitObject(e.Hash)
 				if err != nil {
-					err = c.tryFetchFromSubmodules(subpath, e.Hash)
+					npErr, err := c.tryFetchFromSubmodules(subpath, e.Hash)
+					if npErr != nil && c.autoexclude {
+						c.infof("Excluding %v\n", e.Hash)
+						c.exclude(e.Hash)
+						continue
+					}
 					if err != nil {
-						if c.autoexclude {
-							c.infof("Excluding %v\n", e.Hash)
-							c.exclude(e.Hash)
-							continue
-						}
 						return nil, fmt.Errorf("%v (fetch it manually? or try --exclude)", err)
 					}
 				}
