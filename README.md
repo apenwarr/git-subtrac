@@ -8,12 +8,18 @@ which can be pushed, pulled, forked, and merged however you want.
 ## Quick start
 
 git-subtrac is a git extension written in the Go language using the lovely
-[go-git](https://github.com/src-d/go-git) library. If you have a Go compiler
-set up, you can install the tool like this:
+[go-git](https://github.com/src-d/go-git) library. If you have Go 1.12 or
+higher and a project that already uses go modules (contains a go.mod file),
+you can install the tool like this:
 
         go install github.com/apenwarr/git-subtrac
 
-This will drop the compiled program into Go's bin directory, often
+If you have an older version of go or don't care about go modules, you can
+install it like this instead:
+
+        go get -v github.com/apenwarr/git-subtrac
+
+This will drop the compiled program into Go's $GOPATH/bin directory, often
 `$HOME/go/bin`. As long as that's in your `$PATH`, you will then be able to
 run commands like `git subtrac <whatever>`.
 
