@@ -50,6 +50,11 @@ End users downloading your project don't need to have git-subtrac installed,
 unless they make their own changes to submodules. All the `git submodule`
 commands continue to work exactly the same way as before.
 
+Tip: Ask people working on your project to configure their Git client to
+recurse submodules when pulling. Otherwise there's a risk people would
+commit stale state of the submodules. You can run `git config submodule.recurse true`
+to do that.
+
 ## What problem are we solving?
 
 git submodules have been very complicated and hard to use since the earliest
