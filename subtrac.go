@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A Trac represents a commit or tree somewhere in the project's hierarchy,
@@ -316,7 +317,12 @@ func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, hea
 	sig := object.Signature{
 		Name:  "git-subtrac",
 		Email: "git-subtrac@",
-		When:  commit.Committer.When,
+		// This *should* preserve the timezone from the original
+		// commit, but a bug in either go-git or go's time library
+		// prevents that from working and uses the local timezone
+		// instead. We want the generated commits to be identical
+		// no matter who generates them, so let's force UTC instead.
+		When:  commit.Committer.When.In(time.UTC),
 	}
 	emptyTree := object.Tree{}
 	nec := c.repo.Storer.NewEncodedObject()
