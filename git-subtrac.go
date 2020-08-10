@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/apenwarr/git-subtrac/subtrac"
 	"github.com/pborman/getopt"
 	"gopkg.in/src-d/go-git.v4"
 	"log"
@@ -54,13 +55,13 @@ func main() {
 		debugf = func(fmt string, args ...interface{}) {}
 	}
 
-	setupOrFatal := func() *Cache {
+	setupOrFatal := func() *subtrac.Cache {
 		r, err := git.PlainOpen(*repodir)
 		if err != nil {
 			fatalf("git: %v: %v\n", *repodir, err)
 		}
 
-		c, err := NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
+		c, err := subtrac.NewCache(*repodir, r, *excludes, *autoexclude, debugf, infof)
 		if err != nil {
 			fatalf("NewCache: %v\n", err)
 		}

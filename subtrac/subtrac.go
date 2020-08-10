@@ -1,4 +1,4 @@
-package main
+package subtrac
 
 import (
 	"bufio"
@@ -446,7 +446,7 @@ var NotPresent = &NotPresentError{}
 // exists, 'git fetch' it into the main repository so we can refer to it
 // as a parent of our synthetic commits.
 func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) (*NotPresentError, error) {
-	c.infof("Searching submodules for: %v\n", path)
+	c.infof("Searching submodules for: %v %v\n", path, hash)
 	paths, repos, err := c.allSubrepos()
 	if err != nil {
 		return nil, err
@@ -454,9 +454,10 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) (*NotPre
 	for i := range repos {
 		subpath := paths[i]
 		subr := repos[i]
+		c.infof("   path=%q subr=%q\n", subpath, subr)
 		_, err = subr.CommitObject(hash)
 		if err != nil {
-			c.infof("  ...not in %v\n", subpath)
+			c.infof("  ...not in %v %v\n", subpath, err)
 			continue
 		}
 		c.infof("  ...found! in %v\n", subpath)
