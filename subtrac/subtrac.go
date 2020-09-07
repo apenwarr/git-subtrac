@@ -454,7 +454,7 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) (*NotPre
 	for i := range repos {
 		subpath := paths[i]
 		subr := repos[i]
-		c.infof("   path=%q subr=%q\n", subpath, subr)
+		c.infof("   path=%q\n", subpath)
 		_, err = subr.CommitObject(hash)
 		if err != nil {
 			c.infof("  ...not in %v %v\n", subpath, err)
