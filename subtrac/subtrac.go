@@ -483,13 +483,17 @@ func (c *Cache) tryFetchFromSubmodules(path string, hash plumbing.Hash) (*NotPre
 		if err != nil {
 			return nil, fmt.Errorf("submodule %v: CreateRemote: %v", absremotename, err)
 		}
+		_, err = remote.List(&git.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("submodule %v: List() failed, repo corrupted! %v", absremotename, err)
+		}
 		err = remote.Fetch(&git.FetchOptions{
 			RemoteName: "anonymous",
 			RefSpecs: []config.RefSpec{
 				config.RefSpec(brrefname + ":TRAC_FETCH_HEAD"),
 			},
 		})
-		if err != nil {
+		if err != nil && err != git.NoErrAlreadyUpToDate {
 			return nil, fmt.Errorf("submodule %v: fetch: %v", absremotename, err)
 		}
 		// Fetch worked!
