@@ -9,3 +9,5 @@ require (
 	golang.org/x/net v0.0.0-20200707034311-ab3426394381 // indirect
 	golang.org/x/sys v0.0.0-20200625212154-ddb9806d33ae // indirect
 )
+
+replace github.com/go-git/go-git/v5 => github.com/apenwarr/go-git/v5 v5.1.1-0.20200907022654-1d8ef24f2d99
