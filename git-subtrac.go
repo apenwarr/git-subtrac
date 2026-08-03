@@ -2,18 +2,19 @@ package main
 
 import (
 	"fmt"
-	"github.com/apenwarr/git-subtrac/subtrac"
-	"github.com/pborman/getopt"
-	"github.com/go-git/go-git/v5"
 	"log"
 	"os"
+
+	"github.com/apenwarr/git-subtrac/subtrac"
+	"github.com/go-git/go-git/v5"
+	"github.com/pborman/getopt"
 )
 
-func fatalf(fmt string, args ...interface{}) {
-	log.Fatalf("git-subtrac: "+fmt, args...)
+func fatalf(format string, args ...any) {
+	log.Fatalf("git-subtrac: "+format, args...)
 }
 
-var usage_str = `
+var usageText = `
 Commands:
     cid <ref>       Print the id of a tracking commit based on the given ref
     dump <refs...>  Print the cache after loading the given branch ref(s)
@@ -23,10 +24,10 @@ Commands:
 func usage() {
 	fmt.Fprintf(os.Stderr, "\n")
 	getopt.PrintUsage(os.Stderr)
-	fmt.Fprintf(os.Stderr, usage_str)
+	fmt.Fprint(os.Stderr, usageText)
 }
 
-func usagef(format string, args ...interface{}) {
+func usagef(format string, args ...any) {
 	usage()
 	fmt.Fprintf(os.Stderr, "\nfatal: "+format+"\n", args...)
 	os.Exit(99)
@@ -37,22 +38,27 @@ func main() {
 	infof := log.Printf
 
 	getopt.SetUsage(usage)
+	help := getopt.BoolLong("help", 'h', "show this help")
 	repodir := getopt.StringLong("git-dir", 'd', ".", "path to git repo", "GIT_DIR")
 	excludes := getopt.ListLong("exclude", 'x', "commitids to exclude", "commitids...")
 	autoexclude := getopt.BoolLong("auto-exclude", 0, "auto exclude missing commits")
 	verbose := getopt.BoolLong("verbose", 'v', "verbose mode")
 	getopt.Parse()
+	if *help {
+		usage()
+		return
+	}
 
 	args := getopt.Args()
 	if len(args) < 1 {
 		usagef("no command specified.")
 	}
 
-	var debugf func(fmt string, args ...interface{})
+	var debugf func(format string, args ...any)
 	if *verbose {
 		debugf = infof
 	} else {
-		debugf = func(fmt string, args ...interface{}) {}
+		debugf = func(format string, args ...any) {}
 	}
 
 	setupOrFatal := func() *subtrac.Cache {

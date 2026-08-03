@@ -7,21 +7,21 @@ which can be pushed, pulled, forked, and merged however you want.
 
 ## Quick start
 
-git-subtrac is a git extension written in the Go language using the lovely
-[go-git](https://github.com/src-d/go-git) library. If you have Go 1.12 or
-higher and a project that already uses go modules (contains a go.mod file),
-you can install the tool like this:
+git-subtrac is a Git extension written in Go using
+[go-git](https://github.com/go-git/go-git). With a current Go toolchain,
+install the latest published version with:
 
-        go install github.com/apenwarr/git-subtrac
+        go install github.com/apenwarr/git-subtrac@latest
 
-If you have an older version of go or don't care about go modules, you can
-install it like this instead:
+From a local checkout, install the exact source you are looking at with:
 
-        go get -v github.com/apenwarr/git-subtrac
+        go install .
 
-This will drop the compiled program into Go's $GOPATH/bin directory, often
-`$HOME/go/bin`. As long as that's in your `$PATH`, you will then be able to
-run commands like `git subtrac <whatever>`.
+Either command installs `git-subtrac` into `$GOBIN`, or `$GOPATH/bin` when
+`GOBIN` is unset (often `$HOME/go/bin`). Once that directory is in `$PATH`,
+verify the installation and see the command summary with:
+
+        git subtrac --help
 
 To collect the submodule history for all your branches into new tracking
 branches, just do this (from inside the git repository you want to affect):

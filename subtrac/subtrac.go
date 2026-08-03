@@ -3,16 +3,17 @@ package subtrac
 import (
 	"bufio"
 	"fmt"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/filemode"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // A Trac represents a commit or tree somewhere in the project's hierarchy,
@@ -42,8 +43,8 @@ func (t Trac) String() string {
 }
 
 type Cache struct {
-	debugf      func(fmt string, args ...interface{})
-	infof       func(fmt string, args ...interface{})
+	debugf      func(format string, args ...any)
+	infof       func(format string, args ...any)
 	repoDir     string                  // toplevel repo dir
 	repo        *git.Repository         // open copy of the toplevel repo
 	autoexclude bool                    // --auto-exclude enabled
@@ -55,7 +56,7 @@ type Cache struct {
 
 func NewCache(rdir string, r *git.Repository, excludes []string,
 	autoexclude bool,
-	debugf, infof func(fmt string, args ...interface{})) (*Cache, error) {
+	debugf, infof func(format string, args ...any)) (*Cache, error) {
 	c := Cache{
 		debugf:      debugf,
 		infof:       infof,
@@ -322,7 +323,7 @@ func (c *Cache) newTracCommit(commit *object.Commit, tracs []*object.Commit, hea
 		// prevents that from working and uses the local timezone
 		// instead. We want the generated commits to be identical
 		// no matter who generates them, so let's force UTC instead.
-		When:  commit.Committer.When.In(time.UTC),
+		When: commit.Committer.When.In(time.UTC),
 	}
 	emptyTree := object.Tree{}
 	nec := c.repo.Storer.NewEncodedObject()
