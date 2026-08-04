@@ -15,7 +15,7 @@ func fatalf(format string, args ...any) {
 }
 
 var usageText = `
-Commands:
+Commands (as "git subtrac ..." or "go tool git-subtrac ..."):
     cid <ref>       Print the id of a tracking commit based on the given ref
     dump <refs...>  Print the cache after loading the given branch ref(s)
     update          Update all local branches with a matching *.trac branch

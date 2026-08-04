@@ -8,19 +8,23 @@ which can be pushed, pulled, forked, and merged however you want.
 ## Quick start
 
 git-subtrac is a Git extension written in Go using
-[go-git](https://github.com/go-git/go-git). With a current Go toolchain,
-install the latest published version with:
+[go-git](https://github.com/go-git/go-git).
+
+For repeatable project-local use with Go 1.24 or newer, record it in the
+project's `go.mod` as a tool dependency:
+
+        go get -tool github.com/apenwarr/git-subtrac@latest
+
+Then run it without a separate install step or a `$PATH` dependency:
+
+        go tool git-subtrac --help
+        go tool git-subtrac update
+
+`go tool` resolves and caches the version selected by `go.mod`, so every
+maintainer and CI job runs the same version. A global installation remains
+available when convenient:
 
         go install github.com/apenwarr/git-subtrac@latest
-
-From a local checkout, install the exact source you are looking at with:
-
-        go install .
-
-Either command installs `git-subtrac` into `$GOBIN`, or `$GOPATH/bin` when
-`GOBIN` is unset (often `$HOME/go/bin`). Once that directory is in `$PATH`,
-verify the installation and see the command summary with:
-
         git subtrac --help
 
 To collect the submodule history for all your branches into new tracking
